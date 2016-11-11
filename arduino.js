@@ -6,8 +6,6 @@ var port = process.argv[4];
 //console.log(port);
 var number_process = process.argv[5]
 
-var delay = 1000;
-
 var express = require('express');  
 var app = express();  
 var server = require('http').Server(app);  
@@ -16,34 +14,33 @@ var coordinador = require('socket.io-client')('http://localhost:3000');
 var request = require('request');
 var sockets;
 var OK = false;
-var lead;
+var lead_OK = false;
+var lead = null;
 
-setInterval(post_Request,delay);
+setInterval(post_Request,1000);
+setInterval(keepAlive,1000)
 
 io.on('connection', function(socket) {  
   socket.on('listen', function(data) {
     console.log(data);
-    if(data == "OK"){
+    if(data.type_message == "OK"){
         OK = true;
-    }
-    if(data.lead == 0){
-        responseOK(sockets,data.number_process)
-    }else if(data.lead == 1){
+    }else if(data.type_message == "leadOff"){
+        response(sockets,data.number_process,{type_message: "OK"});
+    }else if(data.type_message == "leadOn"){
         lead = getSocket(sockets,data.number_process);
         lead.socket.emit('listen',"Hola lider");
+    }else if(data.type_message == "keepAlive"){
+        response(sockets,data.number_process,{type_message: "keepAliveResponse"});
+    }else if(data.type_message == "keepAliveResponse"){
+        lead_OK = true;
     }
   });
 });
 
 coordinador.on("arduinos",function(data){
     sockets = createSockets(data);
-    leadBroadcast(sockets);
-    setTimeout(function(){
-        if(OK == false){
-            console.log("YO SOY EL LIDER");
-            leadAdvert(sockets);
-        }
-    },3000);
+    startAlgorithm();
 });
 
 server.listen(port, function() {  
@@ -100,10 +97,21 @@ function getDateTime() {
     return year + "-" + month + "-" + day + ":" + hour + ":" + min + ":" + sec;
 }
 
-function responseOK(sockets,number_process){ 
+function startAlgorithm(){
+    findLead(sockets);
+    OK = false;
+    setTimeout(function(){
+        if(OK == false){
+            console.log("YO SOY EL LIDER");
+            leadAdvert(sockets);
+        }
+    },3000);
+}
+
+function response(sockets,number_process,message){ 
     for (var i = sockets.length - 1; i >= 0; i--) {
         if(sockets[i].number_process == number_process){
-            sockets[i].socket.emit('listen',"OK");
+            sockets[i].socket.emit('listen',message);
         }
     }
 }
@@ -117,22 +125,22 @@ function createSockets(arduinos){
     return io_sockets;
 }
 
-function leadBroadcast(sockets){
+function findLead(sockets){
     for (var i = sockets.length - 1; i >= 0; i--) {
         if(sockets[i].number_process > number_process){
-            sockets[i].socket.emit('listen',{number_process: number_process, lead: 0});    
+            sockets[i].socket.emit('listen',{type_message: "leadOff", number_process: number_process});    
         }
     }
 }
 
 function leadAdvert(sockets){
     for (var i = sockets.length - 1; i >= 0; i--) {
-        sockets[i].socket.emit('listen',{number_process: number_process, lead: 1});    
+        sockets[i].socket.emit('listen',{type_message: "leadOn", number_process: number_process});    
     }
 }
 
 function getSocket(sockets,number_process){
-     for (var i = sockets.length - 1; i >= 0; i--) {
+    for (var i = sockets.length - 1; i >= 0; i--) {
         if(sockets[i].number_process == number_process){
             return sockets[i];
         }
@@ -140,3 +148,17 @@ function getSocket(sockets,number_process){
     return null;
 }
 
+function keepAlive(){
+    if(lead != null){
+        lead.socket.emit('listen',{type_message: "keepAlive", number_process: number_process});
+        lead_OK = false;
+        setTimeout(function(){
+            if(lead_OK == false){
+                console.log("Lead is Dead")
+                coordinador.emit('remove',{number_process: lead.number_process})
+                lead = null;
+                startAlgorithm();
+            }
+        },500);
+    }
+}
