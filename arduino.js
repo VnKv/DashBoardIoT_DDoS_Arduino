@@ -9,22 +9,45 @@ var number_process = process.argv[5]
 var delay = 1000;
 
 var express = require('express');  
-var app = express();
+var app = express();  
 var server = require('http').Server(app);  
+var io = require('socket.io')(server);
+var coordinador = require('socket.io-client')('http://localhost:3000');
 var request = require('request');
-var io = require('socket.io-client')('http://localhost:3000');
-
-/*server.listen(port, function() {  
-    console.log('Servidor corriendo en http://localhost:' + port);
-});*/
+var sockets;
+var OK = false;
+var lead;
 
 setInterval(post_Request,delay);
 
-io.on("arduinos",function(data){
+io.on('connection', function(socket) {  
+  socket.on('listen', function(data) {
     console.log(data);
-    //Start Lead Election
-    var lead = getLead(data.arduinos);
-    console.log(lead);
+    if(data == "OK"){
+        OK = true;
+    }
+    if(data.lead == 0){
+        responseOK(sockets,data.number_process)
+    }else if(data.lead == 1){
+        lead = getSocket(sockets,data.number_process);
+        lead.socket.emit('listen',"Hola lider");
+    }
+  });
+});
+
+coordinador.on("arduinos",function(data){
+    sockets = createSockets(data);
+    leadBroadcast(sockets);
+    setTimeout(function(){
+        if(OK == false){
+            console.log("YO SOY EL LIDER");
+            leadAdvert(sockets);
+        }
+    },3000);
+});
+
+server.listen(port, function() {  
+    console.log('Servidor corriendo en http://localhost:' + port);
 });
 
 function post_Request(){
@@ -77,14 +100,43 @@ function getDateTime() {
     return year + "-" + month + "-" + day + ":" + hour + ":" + min + ":" + sec;
 }
 
-function getLead(arduinos){
-    var max = 0;
-    var index = 0; 
-    for (var i = arduinos.length - 1; i >= 0; i--) {
-        if(arduinos[i].number_process > max){
-            index = i;
-            max = arduinos[i].number_process;
+function responseOK(sockets,number_process){ 
+    for (var i = sockets.length - 1; i >= 0; i--) {
+        if(sockets[i].number_process == number_process){
+            sockets[i].socket.emit('listen',"OK");
         }
     }
-    return arduinos[index];
 }
+
+function createSockets(arduinos){
+    var io_sockets = [];
+    for (var i = arduinos.length - 1; i >= 0; i--) {
+        var io_socket = require('socket.io-client')('http://' + arduinos[i].ip + ":" + arduinos[i].port);
+        io_sockets.push({number_process: arduinos[i].number_process, socket: io_socket});
+    }
+    return io_sockets;
+}
+
+function leadBroadcast(sockets){
+    for (var i = sockets.length - 1; i >= 0; i--) {
+        if(sockets[i].number_process > number_process){
+            sockets[i].socket.emit('listen',{number_process: number_process, lead: 0});    
+        }
+    }
+}
+
+function leadAdvert(sockets){
+    for (var i = sockets.length - 1; i >= 0; i--) {
+        sockets[i].socket.emit('listen',{number_process: number_process, lead: 1});    
+    }
+}
+
+function getSocket(sockets,number_process){
+     for (var i = sockets.length - 1; i >= 0; i--) {
+        if(sockets[i].number_process == number_process){
+            return sockets[i];
+        }
+    }
+    return null;
+}
+
