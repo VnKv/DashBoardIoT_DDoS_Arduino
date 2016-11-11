@@ -16,13 +16,15 @@ var sockets;
 var OK = false;
 var lead_OK = false;
 var lead = null;
+var server_to_attack = null;
 
 setInterval(post_Request,1000);
 setInterval(keepAlive,1000)
+setInterval(attacking,1000)
 
 io.on('connection', function(socket) {  
   socket.on('listen', function(data) {
-    console.log(data);
+    //console.log(data);
     if(data.type_message == "OK"){
         OK = true;
     }else if(data.type_message == "leadOff"){
@@ -34,13 +36,24 @@ io.on('connection', function(socket) {
         response(sockets,data.number_process,{type_message: "keepAliveResponse"});
     }else if(data.type_message == "keepAliveResponse"){
         lead_OK = true;
+    }else if(data.type_message == "attack"){
+        server_to_attack = data.server;
     }
   });
 });
 
-coordinador.on("arduinos",function(data){
+coordinador.on('arduinos',function(data){
     sockets = createSockets(data);
     startAlgorithm();
+});
+
+coordinador.on('attack_list',function(data){
+    console.log(data);
+    if(lead.number_process == number_process){
+        var server = randomServer(data);
+        startAttack(sockets,server);
+    }
+
 });
 
 server.listen(port, function() {  
@@ -62,10 +75,17 @@ function post_Request(){
                 "port": port
             }
         }, function(error, response, body){
-            if(body != null){        
-                delay = body.delay;
-                console.log(delay)
-            }
+    });
+}
+
+function simple_Post(){
+    request({
+        url: "http://" + server_to_attack.ip + ":" + server_to_attack.port,
+        method: 'POST',
+        json: {
+                "Saludo" : "Hello World",
+              }
+        }, function(error, response, body){
     });
 }
 
@@ -103,7 +123,10 @@ function startAlgorithm(){
     setTimeout(function(){
         if(OK == false){
             console.log("YO SOY EL LIDER");
-            leadAdvert(sockets);
+            leadMessage(sockets,{type_message: "leadOn", number_process: number_process});
+            if(server_to_attack != null){
+               startAttack(sockets,server_to_attack); 
+            }
         }
     },3000);
 }
@@ -133,9 +156,9 @@ function findLead(sockets){
     }
 }
 
-function leadAdvert(sockets){
+function leadMessage(sockets,message){
     for (var i = sockets.length - 1; i >= 0; i--) {
-        sockets[i].socket.emit('listen',{type_message: "leadOn", number_process: number_process});    
+        sockets[i].socket.emit('listen',message);    
     }
 }
 
@@ -161,4 +184,21 @@ function keepAlive(){
             }
         },500);
     }
+}
+
+function startAttack(sockets,server_attack){
+    console.log(server_attack);
+    console.log("attack: " + server_attack.ip + server_attack.port);
+    leadMessage(sockets,{type_message: "attack", server: server_attack})
+}
+
+function attacking(){
+    if(server_to_attack != null){
+        simple_Post();
+    }
+}
+
+function randomServer(servers){
+    var indice = random(0,servers.length - 1, 1)
+    return servers[indice];
 }
